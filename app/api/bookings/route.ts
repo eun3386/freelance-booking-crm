@@ -3,6 +3,7 @@ import { BRANCHES, DEPARTMENTS, TIMES, normalizePhone } from '@/lib/config'
 import { repo } from '@/lib/repo'
 import { SlotTakenError } from '@/lib/types'
 import { verify } from '@/lib/auth'
+import { notifyDiscord } from '@/lib/notify'
 
 export async function POST(req: Request) {
   const b = await req.json()
@@ -24,6 +25,10 @@ export async function POST(req: Request) {
 
   try {
     const booking = await repo.create({ branchId: b.branchId, deptId: b.deptId, date: b.date, time: b.time, name, phone })
+    // 개인정보 보호: 이름은 첫 글자만, 전화번호는 보내지 않음
+    const branch = BRANCHES.find((x) => x.id === b.branchId)?.name ?? b.branchId
+    const dept = DEPARTMENTS.find((x) => x.id === b.deptId)?.name ?? b.deptId
+    await notifyDiscord(`📅 새 예약 · ${branch} ${dept} · ${b.date} ${b.time} · ${name[0]}**`)
     return NextResponse.json({ booking })
   } catch (e) {
     if (e instanceof SlotTakenError) return NextResponse.json({ error: '방금 다른 고객이 예약한 시간입니다. 다른 시간을 선택해주세요.' }, { status: 409 })
