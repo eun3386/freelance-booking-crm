@@ -40,7 +40,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
         <input className="input" type="password" placeholder="비밀번호" value={password} onChange={(e) => setP(e.target.value)} autoComplete="current-password" />
         {err && <p className="text-sm text-red-600">{err}</p>}
         <button className="btn btn-primary w-full">로그인</button>
-        <p className="text-xs text-slate-400">데모 계정은 README 참고</p>
+        <p className="text-xs text-slate-400">데모 사이트입니다. 데모 계정은 README를 참고하세요. 모든 데이터는 가상입니다.</p>
       </form>
     </main>
   )

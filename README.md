@@ -80,9 +80,9 @@ DB 모드 모두 같은 규칙을 DB 레벨에서 강제합니다: 부분 유니
 `schema.sql` 실행 후 Project Settings → API의 URL과 `service_role` 키를 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`로 등록합니다. `service_role` 키는 서버 전용입니다.
 
 ## 데모 모드 안내
-- SMS는 발송하지 않고 화면에 인증번호를 표시합니다(`SMS_PROVIDER` 미설정 시). 포트폴리오에는 "데모 모드"라고 밝혀 두는 것을 권장합니다. 실제 발송을 붙이려면 `app/api/sms/send/route.ts`에 발송 API(알리고, NHN Cloud, Twilio 등)를 연결하고 `SMS_PROVIDER`를 설정하세요.
+- SMS는 데모 모드입니다. `SMS_PROVIDER`가 없으면 발송하지 않고 화면에 인증번호를 표시합니다. 실제 발송은 `app/api/sms/send/route.ts`에 발송 API(알리고, NHN Cloud, Twilio 등)를 연결하고 `SMS_PROVIDER`를 설정하면 됩니다.
 - 인증번호는 평문이 아닌 해시로 저장되며, 서버리스에서도 유지되도록 DB 모드에서는 `sms_otps` 테이블에 보관합니다.
-- 관리자 계정은 `lib/auth.ts`에 하드코딩된 데모용입니다. 공개 배포 시 누구나 README의 데모 계정으로 로그인할 수 있으니, 공개 URL에서는 데모 계정임을 안내하거나 비밀번호를 바꾸고 클라이언트에게만 전달하세요. 운영에서는 Supabase Auth + 역할 테이블로 교체합니다.
+- 관리자 계정은 `lib/auth.ts`에 하드코딩된 데모용입니다. 공개 데모이므로 누구나 이 계정으로 로그인할 수 있고, 데이터는 모두 가상입니다. 운영에서는 Supabase Auth + 역할 테이블로 교체합니다.
 
 ## 중복 예약 방지
 같은 지점·진료과·날짜·시간의 비취소 예약은 1건만 허용합니다.

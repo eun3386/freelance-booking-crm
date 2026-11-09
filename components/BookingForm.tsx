@@ -126,6 +126,9 @@ export function BookingForm() {
       </Step>
       <Step n={5} title="예약자 정보 · 휴대폰 인증">
         <div className="space-y-2">
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            데모 사이트입니다. 실제 이름·번호 대신 임의의 값(예: 01012345678)을 입력해 주세요.
+          </p>
           <input className="input" placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />
           <div className="flex gap-2">
             <input className="input" inputMode="numeric" placeholder="휴대폰 번호 (숫자만)" value={phone} disabled={!!token}
