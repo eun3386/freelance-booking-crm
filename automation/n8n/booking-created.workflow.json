@@ -1,0 +1,326 @@
+{
+  "id": "crmBookingCreated",
+  "name": "예약 CRM · 예약 접수 확인 문자 (웹훅 → 고객 문자)",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "예약 생성 웹훅",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-created",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "booking-created-hook"
+    },
+    {
+      "id": "n2",
+      "name": "비밀값 확인",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.headers['x-automation-secret'] }}",
+              "rightValue": "={{ $env.AUTOMATION_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $env.AUTOMATION_SECRET }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "n3",
+      "name": "응답 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        -80
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n4",
+      "name": "응답 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: \"unauthorized\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "n5",
+      "name": "예약 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BOOKING_API_URL + '/api/automation/bookings' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('예약 생성 웹훅').first().json.body.date }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $('예약 생성 웹훅').first().json.body.date }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.AUTOMATION_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n6",
+      "name": "예약 찾기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "// 웹훅에는 전화번호가 없으므로(개인정보 최소화) 인증된 API 로 예약을 다시 조회해 연락처를 얻는다\nconst id = $('예약 생성 웹훅').first().json.body.id;\nconst b = ($input.first().json.bookings || []).find(x => x.id === id);\nif (!b || b.status === 'cancelled') return [];\nreturn [{ json: { id: b.id, to: b.phone, branchName: b.branchName, date: b.date, time: b.time,\n  text: '[' + b.branchName + '] ' + b.name + '님, ' + b.date + ' ' + b.time + ' ' + b.deptName + ' 예약이 접수되었습니다.' } }];"
+      }
+    },
+    {
+      "id": "n7",
+      "name": "확인 문자 발송",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SMS_GATEWAY_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.to, text: $json.text }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n8",
+      "name": "슬랙 문자 실패 경고",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        20
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '⚠️ 예약 접수 확인 문자 발송 실패 (재시도 3회 후) · ' + $('예약 찾기').item.json.branchName + ' · ' + $('예약 찾기').item.json.date + ' ' + $('예약 찾기').item.json.time + ' · 예약ID ' + $('예약 찾기').item.json.id }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n9",
+      "name": "에러 트리거",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n10",
+      "name": "에러 알림",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '🚨 워크플로우 실패: ' + $json.workflow.name + ' / 노드: ' + $json.execution.lastNodeExecuted + ' / ' + $json.execution.error.message }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "예약 생성 웹훅": {
+      "main": [
+        [
+          {
+            "node": "비밀값 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "비밀값 확인": {
+      "main": [
+        [
+          {
+            "node": "응답 200",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 200": {
+      "main": [
+        [
+          {
+            "node": "예약 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "예약 조회": {
+      "main": [
+        [
+          {
+            "node": "예약 찾기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "예약 찾기": {
+      "main": [
+        [
+          {
+            "node": "확인 문자 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "확인 문자 발송": {
+      "main": [
+        [],
+        [
+          {
+            "node": "슬랙 문자 실패 경고",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "에러 트리거": {
+      "main": [
+        [
+          {
+            "node": "에러 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  }
+}

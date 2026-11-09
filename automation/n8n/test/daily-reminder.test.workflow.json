@@ -1,0 +1,353 @@
+{
+  "id": "crmDailyReminderT",
+  "name": "(테스트) 예약 CRM · 전날 리마인드 (매일 18시)",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "매일 18시",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "내일 날짜 계산",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// 한국 시간 기준 내일 (서버 시간대와 무관하게 계산)\nconst kst = new Date(Date.now() + 9 * 3600 * 1000 + 24 * 3600 * 1000);\nreturn [{ json: { date: kst.toISOString().slice(0, 10) } }];"
+      }
+    },
+    {
+      "id": "n3",
+      "name": "예약 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BOOKING_API_URL + '/api/automation/bookings' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $json.date }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $json.date }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.AUTOMATION_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n4",
+      "name": "리마인드 대상 정리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// 취소된 예약은 제외하고 문자 내용을 만든다 (0건이면 이후 노드는 실행되지 않는다)\nconst rows = $input.first().json.bookings || [];\nreturn rows.filter(b => b.status !== 'cancelled').map(b => ({ json: {\n  id: b.id, to: b.phone, branchName: b.branchName,\n  text: '[' + b.branchName + '] ' + b.name + '님, 내일 ' + b.time + ' ' + b.deptName + ' 예약이 있습니다. 변경·취소는 지점으로 연락 주세요.'\n} }));"
+      }
+    },
+    {
+      "id": "n5",
+      "name": "문자 발송",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SMS_GATEWAY_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.to, text: $json.text }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n6",
+      "name": "발송 집계",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "// 발송에 성공한 항목만 지점별로 센다 (개인정보는 요약에 넣지 않는다)\nconst by = {};\n$input.all().forEach((_, i) => { const k = $('리마인드 대상 정리').itemMatching(i).json.branchName; by[k] = (by[k] || 0) + 1; });\nconst parts = Object.entries(by).map(([k, v]) => k + ' ' + v);\nreturn [{ json: { date: $('내일 날짜 계산').first().json.date, total: $input.all().length, detail: parts.join(', ') } }];"
+      }
+    },
+    {
+      "id": "n7",
+      "name": "슬랙 발송 요약",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '📨 내일(' + $json.date + ') 예약 ' + $json.total + '건 리마인드 문자 발송 완료 (' + $json.detail + ')' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n8",
+      "name": "발송 실패 집계",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        120
+      ],
+      "parameters": {
+        "jsCode": "const by = {};\n$input.all().forEach((_, i) => { const k = $('리마인드 대상 정리').itemMatching(i).json.branchName; by[k] = (by[k] || 0) + 1; });\nconst parts = Object.entries(by).map(([k, v]) => k + ' ' + v);\nreturn [{ json: { date: $('내일 날짜 계산').first().json.date, failed: $input.all().length, total: $('리마인드 대상 정리').all().length, detail: parts.join(', ') } }];"
+      }
+    },
+    {
+      "id": "n9",
+      "name": "슬랙 발송 실패 경고",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '⚠️ 내일(' + $json.date + ') 리마인드 문자 ' + $json.failed + '건 발송 실패 (' + $json.detail + ' / 전체 ' + $json.total + '건, 재시도 3회 후). 수동 확인 필요' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n10",
+      "name": "에러 트리거",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        340
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n11",
+      "name": "에러 알림",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        340
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '🚨 워크플로우 실패: ' + $json.workflow.name + ' / 노드: ' + $json.execution.lastNodeExecuted + ' / ' + $json.execution.error.message }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "test-start",
+      "name": "테스트 시작",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -220,
+        200
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "매일 18시": {
+      "main": [
+        [
+          {
+            "node": "내일 날짜 계산",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "내일 날짜 계산": {
+      "main": [
+        [
+          {
+            "node": "예약 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "예약 조회": {
+      "main": [
+        [
+          {
+            "node": "리마인드 대상 정리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "리마인드 대상 정리": {
+      "main": [
+        [
+          {
+            "node": "문자 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "문자 발송": {
+      "main": [
+        [
+          {
+            "node": "발송 집계",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "발송 실패 집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발송 집계": {
+      "main": [
+        [
+          {
+            "node": "슬랙 발송 요약",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발송 실패 집계": {
+      "main": [
+        [
+          {
+            "node": "슬랙 발송 실패 경고",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "에러 트리거": {
+      "main": [
+        [
+          {
+            "node": "에러 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "테스트 시작": {
+      "main": [
+        [
+          {
+            "node": "내일 날짜 계산",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  }
+}

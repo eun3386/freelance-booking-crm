@@ -1,0 +1,287 @@
+{
+  "id": "crmWeeklyReport",
+  "name": "예약 CRM · 주간 운영 리포트 (매주 월 09시)",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "매주 월요일 09시",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "지난 7일 범위",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// 한국 시간 기준 지난 7일 (오늘 제외, 어제까지)\nconst day = n => new Date(Date.now() + 9 * 3600 * 1000 - n * 86400000).toISOString().slice(0, 10);\nreturn [{ json: { from: day(7), to: day(1) } }];"
+      }
+    },
+    {
+      "id": "n3",
+      "name": "예약 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BOOKING_API_URL + '/api/automation/bookings' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $json.to }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.AUTOMATION_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n4",
+      "name": "집계",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.first().json.bookings || [];\nconst range = $('지난 7일 범위').first().json;\nconst count = (key) => rows.reduce((m, b) => { const k = key(b); m[k] = (m[k] || 0) + 1; return m; }, {});\nconst top = (m, n) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, n);\nconst cancelled = rows.filter(b => b.status === 'cancelled').length;\nconst total = rows.length;\nconst rate = total ? Math.round(cancelled / total * 1000) / 10 : 0;\nconst byBranch = count(b => b.branchName);\nconst byDept = count(b => b.deptName);\nconst byTime = count(b => b.time);\nconst lines = [\n  '기간: ' + range.from + ' ~ ' + range.to,\n  '전체 예약 ' + total + '건 (확정 ' + rows.filter(b => b.status === 'confirmed').length + ', 대기 ' + rows.filter(b => b.status === 'pending').length + ', 취소 ' + cancelled + ')',\n  '취소율 ' + rate + '%',\n  '지점별: ' + (top(byBranch, 5).map(([k, v]) => k + ' ' + v).join(', ') || '없음'),\n  '진료과별: ' + (top(byDept, 5).map(([k, v]) => k + ' ' + v).join(', ') || '없음'),\n  '인기 시간대: ' + (top(byTime, 3).map(([k, v]) => k + '(' + v + ')').join(', ') || '없음'),\n];\nreturn [{ json: { total, cancelled, rate, facts: lines.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "n5",
+      "name": "AI 코멘트",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/' + ($env.GEMINI_MODEL || 'gemini-2.5-flash') + ':generateContent' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: '아래는 병원 예약 시스템의 지난주 집계다. 숫자에 있는 사실만 근거로 3문장 이내의 한국어 운영 코멘트와 개선 제안 1개를 써줘. 숫자에 없는 내용은 추측하지 마.\\n\\n' + $json.facts }] }], generationConfig: { maxOutputTokens: 4096 } }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n6",
+      "name": "리포트 조립",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// AI 호출이 실패해도 숫자 리포트는 반드시 나간다\nconst facts = $('집계').first().json.facts;\nconst cand = $input.first().json.candidates?.[0];\n// 슬랙은 **굵게** 문법을 쓰지 않으므로 *굵게* 로 바꾸고, 출력 한도로 잘린 답변은 버린다\nconst ai = cand?.finishReason === 'STOP' ? (cand.content?.parts?.[0]?.text || '').replace(/\\*\\*(.+?)\\*\\*/g, '*$1*').trim() : '';\nconst text = '📊 주간 예약 리포트\\n' + facts + '\\n\\n' + (ai ? '💬 AI 코멘트\\n' + ai : '(AI 코멘트를 불러오지 못해 숫자만 전달합니다)');\nreturn [{ json: { text } }];"
+      }
+    },
+    {
+      "id": "n7",
+      "name": "슬랙 리포트 발송",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "n8",
+      "name": "에러 트리거",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n9",
+      "name": "에러 알림",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '🚨 워크플로우 실패: ' + $json.workflow.name + ' / 노드: ' + $json.execution.lastNodeExecuted + ' / ' + $json.execution.error.message }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "매주 월요일 09시": {
+      "main": [
+        [
+          {
+            "node": "지난 7일 범위",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "지난 7일 범위": {
+      "main": [
+        [
+          {
+            "node": "예약 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "예약 조회": {
+      "main": [
+        [
+          {
+            "node": "집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "집계": {
+      "main": [
+        [
+          {
+            "node": "AI 코멘트",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI 코멘트": {
+      "main": [
+        [
+          {
+            "node": "리포트 조립",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "리포트 조립": {
+      "main": [
+        [
+          {
+            "node": "슬랙 리포트 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "에러 트리거": {
+      "main": [
+        [
+          {
+            "node": "에러 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  }
+}

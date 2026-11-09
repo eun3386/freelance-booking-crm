@@ -3,6 +3,19 @@
 병원·뷰티·학원 등 지점형 비즈니스용 **예약 스케줄러 + 관리자 백오피스**.
 Next.js 14 (App Router) · Tailwind CSS · TypeScript.
 
+## 라이브 데모
+- 고객 예약 화면: **https://booking-crm-roan.vercel.app**
+- 관리자 화면: https://booking-crm-roan.vercel.app/admin (데모 계정은 아래 "실행" 참고)
+
+공개 데모이므로 **가상 데이터**만 들어 있고, SMS는 발송하지 않고 인증번호를 화면에 표시합니다. 예약이 접수되면 앱이 디스코드로 알림을 보냅니다.
+
+<img src="docs/booking-mobile.png" alt="모바일 예약 화면" width="320">
+
+관리자 화면 (목록 / 월간 캘린더)
+
+![관리자 목록](docs/admin-list.png)
+![관리자 캘린더](docs/admin-calendar.png)
+
 ## 기능
 **고객 화면 (모바일 우선)**
 - 지점 → 진료과 → 날짜 → 시간 슬롯 선택 (마감 슬롯 비활성, 일요일/점심시간 제외)
@@ -82,3 +95,6 @@ DB 모드 모두 같은 규칙을 DB 레벨에서 강제합니다: 부분 유니
 - `lib/repo-turso.ts` / `lib/repo-neon.ts` / `lib/repo-supabase.ts` / `lib/repo-file.ts` 구현체, `lib/repo.ts` 선택기
 - `sqlite/` Turso용 스키마·시드, `supabase/` PostgreSQL(Neon·Supabase)용 스키마·시드, `scripts/init-db.mjs` Turso 초기화
 - `app/api/*` 예약·인증·관리자 API, `components/*` 고객·관리자 화면
+
+## n8n 자동화 연동
+예약 접수 확인 문자, 전날 문자 리마인드, 주간 운영 리포트를 n8n 으로 자동화했습니다(n8n 알림은 슬랙, 앱 자체의 새 예약 알림은 디스코드). → [automation/README.md](automation/README.md)

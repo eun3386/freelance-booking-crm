@@ -1,0 +1,85 @@
+{
+  "id": "crmErrorFlowT",
+  "name": "(테스트) 오류 알림 경로",
+  "nodes": [
+    {
+      "id": "n11",
+      "name": "에러 알림",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        340
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '🚨 워크플로우 실패: ' + $json.workflow.name + ' / 노드: ' + $json.execution.lastNodeExecuted + ' / ' + $json.execution.error.message }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "test-start",
+      "name": "테스트 시작",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -440,
+        340
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "fake-err",
+      "name": "가짜 오류 데이터",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -220,
+        340
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { workflow: { name: '예약 CRM · 전날 리마인드' }, execution: { lastNodeExecuted: '예약 조회', error: { message: '테스트용 가짜 오류' } } } }];"
+      }
+    }
+  ],
+  "connections": {
+    "테스트 시작": {
+      "main": [
+        [
+          {
+            "node": "가짜 오류 데이터",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "가짜 오류 데이터": {
+      "main": [
+        [
+          {
+            "node": "에러 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  }
+}
